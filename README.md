@@ -30,6 +30,17 @@ npm run dev
 
 打开 <http://localhost:5173>。前端开发服务器会把 `/api` 请求代理到 `http://localhost:8080`。
 
+也可以使用根目录命令：
+
+```bash
+make backend   # 启动 Go API
+make frontend  # 启动 Vue 开发服务器
+make test      # 运行 Go 测试
+make build     # 测试后端并构建前端
+```
+
+每次推送和 Pull Request 都会通过 GitHub Actions 自动执行后端测试和前端构建。
+
 生产构建：
 
 ```bash
