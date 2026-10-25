@@ -2,31 +2,38 @@
 
 Vue + Go 实现的多人语音接力游戏，作为“灵矽应用：语音类游戏”比赛原型。
 
-## 功能
+## 目录结构
 
-- 创建 / 加入 4 位房间码房间，最多 8 人
-- 房主开始游戏，玩家准备状态同步
-- 5 轮语音记忆接力与轮流回合
-- 浏览器 Web Speech API 中文识别，不支持时自动使用演示回声
-- 字符匹配计分、团队进度、倒计时、玩家榜单
-- 房间内实时短讯（1 秒轮询）
-- 移动端响应式界面
+```text
+frontend/  Vue 3 + Vite 客户端
+backend/   Go HTTP API（房间、回合、计分、聊天）
+docs/      设计和接入说明
+```
 
-## 运行
+## 启动
+
+在项目根目录打开两个终端：
 
 终端 1：
 
 ```bash
-go run .
+go run ./backend
 ```
 
 终端 2：
 
 ```bash
+cd frontend
 npm install
 npm run dev
 ```
 
-打开 <http://localhost:5173>。生产构建使用 `npm run build`，Go 服务默认监听 `:8080`。
+打开 <http://localhost:5173>。前端开发服务器会把 `/api` 请求代理到 `http://localhost:8080`。
 
-当前语音识别使用浏览器 API，灵矽 SDK 尚未接入。后续只需替换 Vue 中的识别适配层，后端房间和计分接口不需要改变。生产环境麦克风通常需要 HTTPS 或 localhost。
+生产构建：
+
+```bash
+cd frontend && npm run build
+```
+
+当前语音识别使用浏览器 Web Speech API，不支持时自动使用演示回声；灵矽 SDK 尚未接入，后续只需替换前端语音适配层。
