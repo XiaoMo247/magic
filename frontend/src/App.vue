@@ -10,7 +10,8 @@ const api = "/api",
   transcript = ref(""),
   listening = ref(false),
   busy = ref(false);
-let poller, recognition;
+let poller, recognition, recorder, recordingStream, recordingStop;
+let audioChunks = [];
 const me = computed(() =>
     room.value?.players?.find(
       (p) => p.id === localStorage.getItem("echo-player"),
@@ -24,10 +25,11 @@ const me = computed(() =>
   stageLabel = computed(() =>
     room.value?.stage === "guess" ? "最终猜测" : "语音接力",
   ),
-  displayPhrase = computed(() =>
-    room.value?.stage === "guess"
-      ? room.value?.relay_text || "等待上一棒完成"
-      : room.value?.prompt || "等待当前玩家完成这一棒",
+  displayPhrase = computed(
+    () =>
+      room.value?.relay_text ||
+      room.value?.prompt ||
+      "等待当前玩家完成这一棒",
   ),
   recognitionAvailable = !!(
     window.SpeechRecognition || window.webkitSpeechRecognition
@@ -134,32 +136,60 @@ async function startGame() {
     busy.value = false;
   }
 }
-function begin() {
+async function begin() {
   if (!isMyTurn.value || listening.value) return;
   listening.value = true;
   transcript.value = "";
-  if (!recognitionAvailable) return;
-  const R = window.SpeechRecognition || window.webkitSpeechRecognition;
-  recognition = new R();
-  recognition.lang = "zh-CN";
-  recognition.interimResults = true;
-  recognition.onresult = (e) =>
-    (transcript.value = Array.from(e.results)
-      .map((r) => r[0].transcript)
-      .join(""));
-  recognition.onend = () => (listening.value = false);
-  recognition.start();
+  audioChunks = [];
+  if (recognitionAvailable) {
+    const R = window.SpeechRecognition || window.webkitSpeechRecognition;
+    recognition = new R();
+    recognition.lang = "zh-CN";
+    recognition.interimResults = true;
+    recognition.onresult = (e) =>
+      (transcript.value = Array.from(e.results)
+        .map((r) => r[0].transcript)
+        .join(""));
+    recognition.start();
+  }
+  try {
+    recordingStream = await navigator.mediaDevices?.getUserMedia({ audio: true });
+    if (recordingStream) {
+      recorder = new MediaRecorder(recordingStream);
+      recordingStop = new Promise((resolve) => {
+        recorder.ondataavailable = (event) => event.data.size && audioChunks.push(event.data);
+        recorder.onstop = async () => resolve(await audioToDataURL(new Blob(audioChunks, { type: recorder.mimeType })));
+      });
+      recorder.start();
+    }
+  } catch {
+    recordingStream = null;
+    error.value = "麦克风不可用，将提交语音识别文本";
+  }
+}
+function audioToDataURL(blob) {
+  return new Promise((resolve) => {
+    if (!blob.size) return resolve("");
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result);
+    reader.readAsDataURL(blob);
+  });
 }
 async function end() {
-  if (!listening.value && !transcript.value) return;
+  if (!listening.value && !transcript.value && recorder?.state !== "recording") return;
   recognition?.stop();
+  if (recorder?.state === "recording") recorder.stop();
+  recordingStream?.getTracks().forEach((track) => track.stop());
+  const audioData = recordingStop ? await recordingStop : "";
+  recorder = null;
+  recordingStop = null;
   listening.value = false;
   try {
     const path = room.value?.stage === "guess" ? "/guess" : "/submit";
     const payload =
       room.value?.stage === "guess"
         ? { player_id: me.value.id, guess: transcript.value }
-        : { player_id: me.value.id, transcript: transcript.value };
+        : { player_id: me.value.id, transcript: transcript.value, audio_data: audioData };
     await request(`/rooms/${roomCode.value}${path}`, {
       method: "POST",
       body: JSON.stringify(payload),
@@ -172,7 +202,7 @@ async function end() {
 }
 function speak() {
   const u = new SpeechSynthesisUtterance(
-    room.value?.stage === "guess" ? room.value?.relay_text : room.value?.prompt || "",
+    room.value?.relay_text || room.value?.prompt || "",
   );
   u.lang = "zh-CN";
   u.rate = 0.86;
@@ -329,6 +359,12 @@ onBeforeUnmount(() => {
           <div class="prompt-panel">
             <span class="prompt-kicker">{{ room.stage === "guess" ? "上一棒传来的内容" : "当前传递内容" }}</span>
             <div class="prompt-text">{{ displayPhrase }}</div>
+            <audio
+              v-if="room.relay_audio"
+              class="relay-audio"
+              :src="room.relay_audio"
+              controls
+            ></audio>
             <div class="waveform"><i v-for="n in 20" :key="n"></i></div>
             <p class="hint">
               {{ isMyTurn ? (listening ? "正在聆听你的声音…" : room.stage === "guess" ? "听完上一棒后，说出你认为的原句" : "听清当前内容，再按住按钮复述") : "等待当前玩家完成这一棒" }}

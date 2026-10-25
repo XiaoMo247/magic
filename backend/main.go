@@ -31,6 +31,7 @@ type RelayTurn struct {
 	PlayerID   string `json:"player_id"`
 	Transcript string `json:"transcript"`
 	Score      int    `json:"score"`
+	AudioData  string `json:"audio_data,omitempty"`
 }
 type Room struct {
 	Code                           string    `json:"code"`
@@ -42,6 +43,7 @@ type Room struct {
 	RelayStep                      int
 	Prompt                         string        `json:"prompt"`
 	RelayText                      string        `json:"relay_text"`
+	RelayAudio                     string        `json:"relay_audio,omitempty"`
 	FinalGuess                     string        `json:"final_guess,omitempty"`
 	Turns                          []RelayTurn   `json:"turns"`
 	LastResult                     *Result       `json:"last_result,omitempty"`
@@ -267,9 +269,14 @@ func submit(w http.ResponseWriter, r *http.Request, room *Room) {
 	var in struct {
 		PlayerID   string `json:"player_id"`
 		Transcript string `json:"transcript"`
+		AudioData  string `json:"audio_data"`
 	}
 	if err := decodeJSON(r, &in); err != nil {
 		writeJSON(w, map[string]string{"error": err.Error()}, 400)
+		return
+	}
+	if len(in.AudioData) > 3_000_000 {
+		writeJSON(w, map[string]string{"error": "录音文件过大，请控制在 2MB 以内"}, 400)
 		return
 	}
 	if room.Phase != "playing" || room.Stage != "relay" || room.Players[room.CurrentIndex].ID != in.PlayerID {
@@ -279,8 +286,9 @@ func submit(w http.ResponseWriter, r *http.Request, room *Room) {
 	score := scoreFor(in.Transcript, room.RelayText)
 	p := room.Players[room.CurrentIndex]
 	p.Score += score
-	room.Turns = append(room.Turns, RelayTurn{PlayerID: p.ID, Transcript: in.Transcript, Score: score})
+	room.Turns = append(room.Turns, RelayTurn{PlayerID: p.ID, Transcript: in.Transcript, Score: score, AudioData: in.AudioData})
 	room.RelayText = strings.TrimSpace(in.Transcript)
+	room.RelayAudio = in.AudioData
 	room.LastResult = &Result{Transcript: in.Transcript, Score: score}
 	if room.RelayStep >= len(room.Players)-2 {
 		room.Stage = "guess"
@@ -330,6 +338,7 @@ func guess(w http.ResponseWriter, r *http.Request, room *Room) {
 	room.CurrentIndex = room.TurnStartIndex
 	room.Prompt = prompts[(room.Round-1)%len(prompts)]
 	room.RelayText = room.Prompt
+	room.RelayAudio = ""
 	room.FinalGuess = ""
 	room.Turns = nil
 	writeJSON(w, viewForPlayer(room, in.PlayerID), 200)
@@ -392,6 +401,7 @@ type RoomView struct {
 	CurrentPlayerName string        `json:"current_player_name"`
 	Prompt            string        `json:"prompt"`
 	RelayText         string        `json:"relay_text"`
+	RelayAudio        string        `json:"relay_audio,omitempty"`
 	FinalGuess        string        `json:"final_guess,omitempty"`
 	Turns             []RelayTurn   `json:"turns"`
 	LastResult        *Result       `json:"last_result,omitempty"`
@@ -418,7 +428,7 @@ func view(r *Room) RoomView {
 	if !r.StartedAt.IsZero() {
 		remaining = 24 - int(time.Since(r.StartedAt).Seconds())%24
 	}
-	return RoomView{Code: r.Code, Players: r.Players, Phase: r.Phase, Stage: r.Stage, Round: r.Round, MaxRounds: r.MaxRounds, CurrentPlayerID: cid, CurrentPlayerName: cn, Prompt: r.Prompt, RelayText: r.RelayText, FinalGuess: r.FinalGuess, Turns: r.Turns, LastResult: r.LastResult, Chat: r.Chat, TeamProgress: progress, RemainingSeconds: remaining}
+	return RoomView{Code: r.Code, Players: r.Players, Phase: r.Phase, Stage: r.Stage, Round: r.Round, MaxRounds: r.MaxRounds, CurrentPlayerID: cid, CurrentPlayerName: cn, Prompt: r.Prompt, RelayText: r.RelayText, RelayAudio: r.RelayAudio, FinalGuess: r.FinalGuess, Turns: r.Turns, LastResult: r.LastResult, Chat: r.Chat, TeamProgress: progress, RemainingSeconds: remaining}
 }
 
 func viewForPlayer(r *Room, playerID string) RoomView {
@@ -430,6 +440,7 @@ func viewForPlayer(r *Room, playerID string) RoomView {
 	if playerID != currentID {
 		v.Prompt = ""
 		v.RelayText = ""
+		v.RelayAudio = ""
 	}
 	if r.Stage == "relay" && r.RelayStep > 0 && playerID == currentID {
 		v.Prompt = ""
