@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"net/http"
@@ -68,6 +69,13 @@ func writeJSON(w http.ResponseWriter, v any, s int) {
 	w.WriteHeader(s)
 	json.NewEncoder(w).Encode(v)
 }
+func decodeJSON(r *http.Request, target any) error {
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(target); err != nil {
+		return errors.New("请求数据格式无效")
+	}
+	return nil
+}
 func newID(p string) string {
 	n, _ := rand.Int(rand.Reader, big.NewInt(899999))
 	return fmt.Sprintf("%s%d", p, n.Int64()+100000)
@@ -89,14 +97,21 @@ func roomsHandler(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Name string `json:"name"`
 	}
-	json.NewDecoder(r.Body).Decode(&in)
+	if err := decodeJSON(r, &in); err != nil {
+		writeJSON(w, map[string]string{"error": err.Error()}, 400)
+		return
+	}
 	if strings.TrimSpace(in.Name) == "" {
 		in.Name = "玩家"
 	}
-	room := &Room{Code: newCode(), Phase: "lobby", MaxRounds: 5, Chat: []ChatMessage{{Name: "系统", Text: "房间创建成功，等待队友加入"}}}
+	code := newCode()
+	store.Lock()
+	for store.rooms[code] != nil {
+		code = newCode()
+	}
+	room := &Room{Code: code, Phase: "lobby", MaxRounds: 5, Chat: []ChatMessage{{Name: "系统", Text: "房间创建成功，等待队友加入"}}}
 	p := &Player{ID: newID("p_"), Name: in.Name, Host: true}
 	room.Players = []*Player{p}
-	store.Lock()
 	store.rooms[room.Code] = room
 	store.Unlock()
 	writeJSON(w, map[string]string{"code": room.Code, "player_id": p.ID}, 200)
@@ -148,10 +163,22 @@ func findPlayer(r *Room, id string) *Player {
 	return nil
 }
 func joinRoom(w http.ResponseWriter, r *http.Request, room *Room) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, map[string]string{"error": "method not allowed"}, 405)
+		return
+	}
 	var in struct {
 		Name string `json:"name"`
 	}
-	json.NewDecoder(r.Body).Decode(&in)
+	if err := decodeJSON(r, &in); err != nil {
+		writeJSON(w, map[string]string{"error": err.Error()}, 400)
+		return
+	}
+	in.Name = strings.TrimSpace(in.Name)
+	if in.Name == "" {
+		writeJSON(w, map[string]string{"error": "昵称不能为空"}, 400)
+		return
+	}
 	if len(room.Players) >= 8 {
 		writeJSON(w, map[string]string{"error": "房间已满"}, 409)
 		return
@@ -161,10 +188,17 @@ func joinRoom(w http.ResponseWriter, r *http.Request, room *Room) {
 	writeJSON(w, map[string]string{"player_id": p.ID}, 200)
 }
 func setReady(w http.ResponseWriter, r *http.Request, room *Room) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, map[string]string{"error": "method not allowed"}, 405)
+		return
+	}
 	var in struct {
 		PlayerID string `json:"player_id"`
 	}
-	json.NewDecoder(r.Body).Decode(&in)
+	if err := decodeJSON(r, &in); err != nil {
+		writeJSON(w, map[string]string{"error": err.Error()}, 400)
+		return
+	}
 	if p := findPlayer(room, in.PlayerID); p != nil {
 		p.Ready = true
 		writeJSON(w, view(room), 200)
@@ -173,10 +207,17 @@ func setReady(w http.ResponseWriter, r *http.Request, room *Room) {
 	writeJSON(w, map[string]string{"error": "玩家不存在"}, 404)
 }
 func startRoom(w http.ResponseWriter, r *http.Request, room *Room) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, map[string]string{"error": "method not allowed"}, 405)
+		return
+	}
 	var in struct {
 		PlayerID string `json:"player_id"`
 	}
-	json.NewDecoder(r.Body).Decode(&in)
+	if err := decodeJSON(r, &in); err != nil {
+		writeJSON(w, map[string]string{"error": err.Error()}, 400)
+		return
+	}
 	p := findPlayer(room, in.PlayerID)
 	if p == nil || !p.Host {
 		writeJSON(w, map[string]string{"error": "只有房主可以开始"}, 403)
@@ -186,6 +227,12 @@ func startRoom(w http.ResponseWriter, r *http.Request, room *Room) {
 		writeJSON(w, map[string]string{"error": "至少需要 2 名玩家"}, 400)
 		return
 	}
+	for _, player := range room.Players {
+		if !player.Ready {
+			writeJSON(w, map[string]string{"error": "还有玩家未准备"}, 400)
+			return
+		}
+	}
 	room.Phase = "playing"
 	room.CurrentIndex = 0
 	room.Round = 1
@@ -194,11 +241,18 @@ func startRoom(w http.ResponseWriter, r *http.Request, room *Room) {
 	writeJSON(w, view(room), 200)
 }
 func submit(w http.ResponseWriter, r *http.Request, room *Room) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, map[string]string{"error": "method not allowed"}, 405)
+		return
+	}
 	var in struct {
 		PlayerID   string `json:"player_id"`
 		Transcript string `json:"transcript"`
 	}
-	json.NewDecoder(r.Body).Decode(&in)
+	if err := decodeJSON(r, &in); err != nil {
+		writeJSON(w, map[string]string{"error": err.Error()}, 400)
+		return
+	}
 	if room.Phase != "playing" || room.Players[room.CurrentIndex].ID != in.PlayerID {
 		writeJSON(w, map[string]string{"error": "还没轮到你"}, 400)
 		return
@@ -241,11 +295,18 @@ func scoreFor(text, target string) int {
 	return score
 }
 func chatRoom(w http.ResponseWriter, r *http.Request, room *Room) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, map[string]string{"error": "method not allowed"}, 405)
+		return
+	}
 	var in struct {
 		PlayerID string `json:"player_id"`
 		Text     string `json:"text"`
 	}
-	json.NewDecoder(r.Body).Decode(&in)
+	if err := decodeJSON(r, &in); err != nil {
+		writeJSON(w, map[string]string{"error": err.Error()}, 400)
+		return
+	}
 	p := findPlayer(room, in.PlayerID)
 	if p == nil || strings.TrimSpace(in.Text) == "" {
 		writeJSON(w, map[string]string{"error": "消息无效"}, 400)
