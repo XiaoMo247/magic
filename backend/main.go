@@ -12,12 +12,15 @@ import (
 )
 
 type Player struct {
-	ID, Name    string
-	Host, Ready bool
-	Score       int `json:"score"`
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Host  bool   `json:"host"`
+	Ready bool   `json:"ready"`
+	Score int    `json:"score"`
 }
 type ChatMessage struct {
-	Name, Text string `json:"name"`
+	Name string `json:"name"`
+	Text string `json:"text"`
 }
 type Result struct {
 	Transcript string `json:"transcript"`
