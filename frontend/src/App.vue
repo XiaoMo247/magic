@@ -25,7 +25,9 @@ const me = computed(() =>
     room.value?.stage === "guess" ? "最终猜测" : "语音接力",
   ),
   displayPhrase = computed(() =>
-    room.value?.stage === "guess" ? room.value?.relay_text : room.value?.prompt,
+    room.value?.stage === "guess"
+      ? room.value?.relay_text || "等待上一棒完成"
+      : room.value?.prompt || "等待当前玩家完成这一棒",
   ),
   recognitionAvailable = !!(
     window.SpeechRecognition || window.webkitSpeechRecognition
@@ -89,7 +91,10 @@ async function joinRoom() {
 async function refresh() {
   if (!roomCode.value) return;
   try {
-    room.value = await request(`/rooms/${roomCode.value}`);
+    const playerID = localStorage.getItem("echo-player");
+    room.value = await request(
+      `/rooms/${roomCode.value}${playerID ? `?player_id=${encodeURIComponent(playerID)}` : ""}`,
+    );
   } catch (e) {
     error.value = e.message;
   }

@@ -24,6 +24,21 @@ func postJSON(t *testing.T, handler http.Handler, path, payload string) map[stri
 	return body
 }
 
+func getJSON(t *testing.T, handler http.Handler, path string) map[string]any {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code >= 300 {
+		t.Fatalf("GET %s returned %d: %s", path, res.Code, res.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	return body
+}
+
 func TestRoomLifecycle(t *testing.T) {
 	store.rooms = map[string]*Room{}
 	mux := http.NewServeMux()
@@ -45,8 +60,16 @@ func TestRoomLifecycle(t *testing.T) {
 	if started["prompt"] == "" {
 		t.Fatal("expected first prompt")
 	}
+	guestView := getJSON(t, mux, "/api/rooms/"+code+"?player_id="+guestID)
+	if guestView["prompt"] != "" {
+		t.Fatal("guest must not see the original prompt")
+	}
 
 	postJSON(t, mux, "/api/rooms/"+code+"/submit", `{"player_id":"`+hostID+`","transcript":"雨后的电车穿过橘色隧道"}`)
+	guessView := getJSON(t, mux, "/api/rooms/"+code+"?player_id="+guestID)
+	if guessView["stage"] != "guess" || guessView["relay_text"] != "雨后的电车穿过橘色隧道" {
+		t.Fatalf("expected guest guess view, got stage=%v relay=%v", guessView["stage"], guessView["relay_text"])
+	}
 	afterGuess := postJSON(t, mux, "/api/rooms/"+code+"/guess", `{"player_id":"`+guestID+`","guess":"雨后的电车穿过橘色隧道"}`)
 	if afterGuess["round"] != float64(2) || afterGuess["stage"] != "relay" {
 		t.Fatalf("expected round 2 relay state, got round=%v stage=%v", afterGuess["round"], afterGuess["stage"])
