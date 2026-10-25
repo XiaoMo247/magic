@@ -65,10 +65,13 @@ func TestRoomLifecycle(t *testing.T) {
 		t.Fatal("guest must not see the original prompt")
 	}
 
-	postJSON(t, mux, "/api/rooms/"+code+"/submit", `{"player_id":"`+hostID+`","transcript":"雨后的电车穿过橘色隧道"}`)
+	postJSON(t, mux, "/api/rooms/"+code+"/submit", `{"player_id":"`+hostID+`","transcript":"雨后的电车穿过橘色隧道","audio_data":"data:audio/webm;base64,AA=="}`)
 	guessView := getJSON(t, mux, "/api/rooms/"+code+"?player_id="+guestID)
 	if guessView["stage"] != "guess" || guessView["relay_text"] != "雨后的电车穿过橘色隧道" {
 		t.Fatalf("expected guest guess view, got stage=%v relay=%v", guessView["stage"], guessView["relay_text"])
+	}
+	if guessView["relay_audio"] != "data:audio/webm;base64,AA==" {
+		t.Fatalf("expected guest to receive previous audio, got %v", guessView["relay_audio"])
 	}
 	afterGuess := postJSON(t, mux, "/api/rooms/"+code+"/guess", `{"player_id":"`+guestID+`","guess":"雨后的电车穿过橘色隧道"}`)
 	if afterGuess["round"] != float64(2) || afterGuess["stage"] != "relay" {

@@ -50,3 +50,5 @@ cd frontend && npm run build
 当前语音识别使用浏览器 Web Speech API，不支持时自动使用演示回声；灵矽 SDK 尚未接入，后续只需替换前端语音适配层。
 
 详细的 5 人对局流程、计分规则、接口状态和比赛演示脚本见 [docs/GAMEPLAY.md](docs/GAMEPLAY.md)。第一次试玩建议先看 [docs/QUICKSTART-3P.md](docs/QUICKSTART-3P.md)。
+
+项目当前完成范围和未完成事项见 [docs/PROJECT-STATUS.md](docs/PROJECT-STATUS.md)。
