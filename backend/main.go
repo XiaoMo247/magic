@@ -27,12 +27,23 @@ type Result struct {
 	Transcript string `json:"transcript"`
 	Score      int    `json:"score"`
 }
+type RelayTurn struct {
+	PlayerID   string `json:"player_id"`
+	Transcript string `json:"transcript"`
+	Score      int    `json:"score"`
+}
 type Room struct {
 	Code                           string    `json:"code"`
 	Players                        []*Player `json:"players"`
 	Phase                          string    `json:"phase"`
+	Stage                          string    `json:"stage"`
 	Round, MaxRounds, CurrentIndex int
+	TurnStartIndex                 int
+	RelayStep                      int
 	Prompt                         string        `json:"prompt"`
+	RelayText                      string        `json:"relay_text"`
+	FinalGuess                     string        `json:"final_guess,omitempty"`
+	Turns                          []RelayTurn   `json:"turns"`
 	LastResult                     *Result       `json:"last_result,omitempty"`
 	Chat                           []ChatMessage `json:"chat"`
 	StartedAt                      time.Time
@@ -144,6 +155,8 @@ func roomHandler(w http.ResponseWriter, r *http.Request) {
 		startRoom(w, r, room)
 	case "submit":
 		submit(w, r, room)
+	case "guess":
+		guess(w, r, room)
 	case "chat":
 		chatRoom(w, r, room)
 	default:
@@ -234,9 +247,15 @@ func startRoom(w http.ResponseWriter, r *http.Request, room *Room) {
 		}
 	}
 	room.Phase = "playing"
+	room.Stage = "relay"
 	room.CurrentIndex = 0
+	room.TurnStartIndex = 0
+	room.RelayStep = 0
 	room.Round = 1
 	room.Prompt = prompts[0]
+	room.RelayText = room.Prompt
+	room.Turns = nil
+	room.FinalGuess = ""
 	room.StartedAt = time.Now()
 	writeJSON(w, view(room), 200)
 }
@@ -253,23 +272,66 @@ func submit(w http.ResponseWriter, r *http.Request, room *Room) {
 		writeJSON(w, map[string]string{"error": err.Error()}, 400)
 		return
 	}
-	if room.Phase != "playing" || room.Players[room.CurrentIndex].ID != in.PlayerID {
+	if room.Phase != "playing" || room.Stage != "relay" || room.Players[room.CurrentIndex].ID != in.PlayerID {
 		writeJSON(w, map[string]string{"error": "还没轮到你"}, 400)
 		return
 	}
-	score := scoreFor(in.Transcript, room.Prompt)
+	score := scoreFor(in.Transcript, room.RelayText)
 	p := room.Players[room.CurrentIndex]
 	p.Score += score
+	room.Turns = append(room.Turns, RelayTurn{PlayerID: p.ID, Transcript: in.Transcript, Score: score})
+	room.RelayText = strings.TrimSpace(in.Transcript)
 	room.LastResult = &Result{Transcript: in.Transcript, Score: score}
-	room.CurrentIndex = (room.CurrentIndex + 1) % len(room.Players)
-	if room.CurrentIndex == 0 {
-		room.Round++
-	}
-	if room.Round > room.MaxRounds {
-		room.Phase = "finished"
+	if room.RelayStep >= len(room.Players)-2 {
+		room.Stage = "guess"
+		room.CurrentIndex = (room.TurnStartIndex + len(room.Players) - 1) % len(room.Players)
 	} else {
-		room.Prompt = prompts[(room.Round-1)%len(prompts)]
+		room.RelayStep++
+		room.CurrentIndex = (room.TurnStartIndex + room.RelayStep) % len(room.Players)
 	}
+	writeJSON(w, view(room), 200)
+}
+func guess(w http.ResponseWriter, r *http.Request, room *Room) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, map[string]string{"error": "method not allowed"}, 405)
+		return
+	}
+	var in struct {
+		PlayerID string `json:"player_id"`
+		Guess    string `json:"guess"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		writeJSON(w, map[string]string{"error": err.Error()}, 400)
+		return
+	}
+	if room.Phase != "playing" || room.Stage != "guess" || room.Players[room.CurrentIndex].ID != in.PlayerID {
+		writeJSON(w, map[string]string{"error": "还没轮到你猜测"}, 400)
+		return
+	}
+	in.Guess = strings.TrimSpace(in.Guess)
+	if in.Guess == "" {
+		writeJSON(w, map[string]string{"error": "猜测内容不能为空"}, 400)
+		return
+	}
+	score := scoreFor(in.Guess, room.Prompt)
+	room.Players[room.CurrentIndex].Score += score
+	room.FinalGuess = in.Guess
+	room.LastResult = &Result{Transcript: in.Guess, Score: score}
+	if room.Round >= room.MaxRounds {
+		room.Phase = "finished"
+		room.Stage = "finished"
+		writeJSON(w, view(room), 200)
+		return
+	}
+	room.Round++
+	room.Stage = "relay"
+	room.TurnStartIndex = (room.Round - 1) % len(room.Players)
+	room.RelayStep = 0
+	room.CurrentIndex = room.TurnStartIndex
+	room.Prompt = prompts[(room.Round-1)%len(prompts)]
+	room.RelayText = room.Prompt
+	room.FinalGuess = ""
+	room.Turns = nil
 	writeJSON(w, view(room), 200)
 }
 func scoreFor(text, target string) int {
@@ -323,11 +385,15 @@ type RoomView struct {
 	Code              string        `json:"code"`
 	Players           []*Player     `json:"players"`
 	Phase             string        `json:"phase"`
+	Stage             string        `json:"stage"`
 	Round             int           `json:"round"`
 	MaxRounds         int           `json:"max_rounds"`
 	CurrentPlayerID   string        `json:"current_player_id"`
 	CurrentPlayerName string        `json:"current_player_name"`
 	Prompt            string        `json:"prompt"`
+	RelayText         string        `json:"relay_text"`
+	FinalGuess        string        `json:"final_guess,omitempty"`
+	Turns             []RelayTurn   `json:"turns"`
 	LastResult        *Result       `json:"last_result,omitempty"`
 	Chat              []ChatMessage `json:"chat"`
 	TeamProgress      int           `json:"team_progress"`
@@ -352,5 +418,5 @@ func view(r *Room) RoomView {
 	if !r.StartedAt.IsZero() {
 		remaining = 24 - int(time.Since(r.StartedAt).Seconds())%24
 	}
-	return RoomView{Code: r.Code, Players: r.Players, Phase: r.Phase, Round: r.Round, MaxRounds: r.MaxRounds, CurrentPlayerID: cid, CurrentPlayerName: cn, Prompt: r.Prompt, LastResult: r.LastResult, Chat: r.Chat, TeamProgress: progress, RemainingSeconds: remaining}
+	return RoomView{Code: r.Code, Players: r.Players, Phase: r.Phase, Stage: r.Stage, Round: r.Round, MaxRounds: r.MaxRounds, CurrentPlayerID: cid, CurrentPlayerName: cn, Prompt: r.Prompt, RelayText: r.RelayText, FinalGuess: r.FinalGuess, Turns: r.Turns, LastResult: r.LastResult, Chat: r.Chat, TeamProgress: progress, RemainingSeconds: remaining}
 }

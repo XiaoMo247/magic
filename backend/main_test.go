@@ -47,6 +47,10 @@ func TestRoomLifecycle(t *testing.T) {
 	}
 
 	postJSON(t, mux, "/api/rooms/"+code+"/submit", `{"player_id":"`+hostID+`","transcript":"雨后的电车穿过橘色隧道"}`)
+	afterGuess := postJSON(t, mux, "/api/rooms/"+code+"/guess", `{"player_id":"`+guestID+`","guess":"雨后的电车穿过橘色隧道"}`)
+	if afterGuess["round"] != float64(2) || afterGuess["stage"] != "relay" {
+		t.Fatalf("expected round 2 relay state, got round=%v stage=%v", afterGuess["round"], afterGuess["stage"])
+	}
 	chat := postJSON(t, mux, "/api/rooms/"+code+"/chat", `{"player_id":"`+guestID+`","text":"接得漂亮"}`)
 	if len(chat["chat"].([]any)) != 2 {
 		t.Fatalf("expected system and player messages, got %v", chat["chat"])
