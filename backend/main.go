@@ -194,7 +194,10 @@ func startRoom(w http.ResponseWriter, r *http.Request, room *Room) {
 	writeJSON(w, view(room), 200)
 }
 func submit(w http.ResponseWriter, r *http.Request, room *Room) {
-	var in struct{ PlayerID, Transcript string }
+	var in struct {
+		PlayerID   string `json:"player_id"`
+		Transcript string `json:"transcript"`
+	}
 	json.NewDecoder(r.Body).Decode(&in)
 	if room.Phase != "playing" || room.Players[room.CurrentIndex].ID != in.PlayerID {
 		writeJSON(w, map[string]string{"error": "还没轮到你"}, 400)
@@ -238,7 +241,10 @@ func scoreFor(text, target string) int {
 	return score
 }
 func chatRoom(w http.ResponseWriter, r *http.Request, room *Room) {
-	var in struct{ PlayerID, Text string }
+	var in struct {
+		PlayerID string `json:"player_id"`
+		Text     string `json:"text"`
+	}
 	json.NewDecoder(r.Body).Decode(&in)
 	p := findPlayer(room, in.PlayerID)
 	if p == nil || strings.TrimSpace(in.Text) == "" {
