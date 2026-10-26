@@ -45,6 +45,7 @@ type Room struct {
 	RelayText                      string        `json:"relay_text"`
 	RelayAudio                     string        `json:"relay_audio,omitempty"`
 	FinalGuess                     string        `json:"final_guess,omitempty"`
+	FinalGuessPlayerID             string        `json:"final_guess_player_id,omitempty"`
 	Turns                          []RelayTurn   `json:"turns"`
 	LastResult                     *Result       `json:"last_result,omitempty"`
 	Chat                           []ChatMessage `json:"chat"`
@@ -62,7 +63,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/rooms", roomsHandler)
 	mux.HandleFunc("/api/rooms/", roomHandler)
-	fmt.Println("Echo Relay API listening on :8080")
+	fmt.Println("Magic Relay API listening on :8080")
 	http.ListenAndServe(":8080", cors(mux))
 }
 func cors(next http.Handler) http.Handler {
@@ -324,6 +325,7 @@ func guess(w http.ResponseWriter, r *http.Request, room *Room) {
 	score := scoreFor(in.Guess, room.Prompt)
 	room.Players[room.CurrentIndex].Score += score
 	room.FinalGuess = in.Guess
+	room.FinalGuessPlayerID = in.PlayerID
 	room.LastResult = &Result{Transcript: in.Guess, Score: score}
 	if room.Round >= room.MaxRounds {
 		room.Phase = "finished"
@@ -340,6 +342,7 @@ func guess(w http.ResponseWriter, r *http.Request, room *Room) {
 	room.RelayText = room.Prompt
 	room.RelayAudio = ""
 	room.FinalGuess = ""
+	room.FinalGuessPlayerID = ""
 	room.Turns = nil
 	writeJSON(w, viewForPlayer(room, in.PlayerID), 200)
 }
@@ -391,23 +394,25 @@ func chatRoom(w http.ResponseWriter, r *http.Request, room *Room) {
 }
 
 type RoomView struct {
-	Code              string        `json:"code"`
-	Players           []*Player     `json:"players"`
-	Phase             string        `json:"phase"`
-	Stage             string        `json:"stage"`
-	Round             int           `json:"round"`
-	MaxRounds         int           `json:"max_rounds"`
-	CurrentPlayerID   string        `json:"current_player_id"`
-	CurrentPlayerName string        `json:"current_player_name"`
-	Prompt            string        `json:"prompt"`
-	RelayText         string        `json:"relay_text"`
-	RelayAudio        string        `json:"relay_audio,omitempty"`
-	FinalGuess        string        `json:"final_guess,omitempty"`
-	Turns             []RelayTurn   `json:"turns"`
-	LastResult        *Result       `json:"last_result,omitempty"`
-	Chat              []ChatMessage `json:"chat"`
-	TeamProgress      int           `json:"team_progress"`
-	RemainingSeconds  int           `json:"remaining_seconds"`
+	Code                 string        `json:"code"`
+	Players              []*Player     `json:"players"`
+	Phase                string        `json:"phase"`
+	Stage                string        `json:"stage"`
+	Round                int           `json:"round"`
+	MaxRounds            int           `json:"max_rounds"`
+	CurrentPlayerID      string        `json:"current_player_id"`
+	CurrentPlayerName    string        `json:"current_player_name"`
+	Prompt               string        `json:"prompt"`
+	RelayText            string        `json:"relay_text"`
+	RelayAudio           string        `json:"relay_audio,omitempty"`
+	FinalGuess           string        `json:"final_guess,omitempty"`
+	FinalGuessPlayerID   string        `json:"final_guess_player_id,omitempty"`
+	FinalGuessPlayerName string        `json:"final_guess_player_name,omitempty"`
+	Turns                []RelayTurn   `json:"turns"`
+	LastResult           *Result       `json:"last_result,omitempty"`
+	Chat                 []ChatMessage `json:"chat"`
+	TeamProgress         int           `json:"team_progress"`
+	RemainingSeconds     int           `json:"remaining_seconds"`
 }
 
 func view(r *Room) RoomView {
@@ -428,7 +433,11 @@ func view(r *Room) RoomView {
 	if !r.StartedAt.IsZero() {
 		remaining = 24 - int(time.Since(r.StartedAt).Seconds())%24
 	}
-	return RoomView{Code: r.Code, Players: r.Players, Phase: r.Phase, Stage: r.Stage, Round: r.Round, MaxRounds: r.MaxRounds, CurrentPlayerID: cid, CurrentPlayerName: cn, Prompt: r.Prompt, RelayText: r.RelayText, RelayAudio: r.RelayAudio, FinalGuess: r.FinalGuess, Turns: r.Turns, LastResult: r.LastResult, Chat: r.Chat, TeamProgress: progress, RemainingSeconds: remaining}
+	finalGuessName := ""
+	if finalPlayer := findPlayer(r, r.FinalGuessPlayerID); finalPlayer != nil {
+		finalGuessName = finalPlayer.Name
+	}
+	return RoomView{Code: r.Code, Players: r.Players, Phase: r.Phase, Stage: r.Stage, Round: r.Round, MaxRounds: r.MaxRounds, CurrentPlayerID: cid, CurrentPlayerName: cn, Prompt: r.Prompt, RelayText: r.RelayText, RelayAudio: r.RelayAudio, FinalGuess: r.FinalGuess, FinalGuessPlayerID: r.FinalGuessPlayerID, FinalGuessPlayerName: finalGuessName, Turns: r.Turns, LastResult: r.LastResult, Chat: r.Chat, TeamProgress: progress, RemainingSeconds: remaining}
 }
 
 func viewForPlayer(r *Room, playerID string) RoomView {
