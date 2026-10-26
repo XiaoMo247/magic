@@ -228,6 +228,9 @@ function leave() {
   roomCode.value = "";
   clearInterval(poller);
 }
+function playerName(playerID) {
+  return room.value?.players?.find((player) => player.id === playerID)?.name || "玩家";
+}
 function handleKeyDown(event) {
   if (event.code === "Space" && isMyTurn.value && !event.repeat) {
     event.preventDefault();
@@ -255,7 +258,7 @@ onBeforeUnmount(() => {
   <div class="app-shell">
     <header class="topbar">
       <a class="brand" href="#" @click.prevent="leave"
-        ><span class="brand-mark">◒</span>回声密令</a
+        ><span class="brand-mark">◒</span>Magic 传声局</a
       >
       <div v-if="room" class="room-meta">
         <span class="live-dot"></span>房间 {{ room.code }} ·
@@ -345,6 +348,23 @@ onBeforeUnmount(() => {
             }}
             位玩家未准备
           </p>
+        </div>
+        <div v-else-if="room.phase === 'finished'" class="game-card reveal-card">
+          <span class="status-pill">本局完成</span>
+          <h2>这句话，传成了什么？</h2>
+          <p class="reveal-source">原句：{{ room.prompt }}</p>
+          <div class="relay-chain">
+            <div v-for="(turn, index) in room.turns" :key="`${turn.player_id}-${index}`" class="relay-item">
+              <div class="relay-meta"><span>{{ index + 1 }} · {{ playerName(turn.player_id) }}</span><strong>{{ turn.score }} 分</strong></div>
+              <p>{{ turn.transcript || "未识别到文字" }}</p>
+              <audio v-if="turn.audio_data" :src="turn.audio_data" controls></audio>
+            </div>
+            <div class="relay-item guess-item">
+              <div class="relay-meta"><span>最终猜测 · {{ room.final_guess_player_name || "玩家" }}</span><strong>{{ room.last_result?.score || 0 }} 分</strong></div>
+              <p>{{ room.final_guess || room.last_result?.transcript || "未提交猜测" }}</p>
+            </div>
+          </div>
+          <p class="reveal-note">本轮结果已公开。重新创建房间即可开始下一局。</p>
         </div>
         <div v-else class="game-card">
           <div class="card-topline">

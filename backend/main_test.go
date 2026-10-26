@@ -82,3 +82,28 @@ func TestRoomLifecycle(t *testing.T) {
 		t.Fatalf("expected system and player messages, got %v", chat["chat"])
 	}
 }
+
+func TestFinalRevealKeepsRelayChain(t *testing.T) {
+	store.rooms = map[string]*Room{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/rooms", roomsHandler)
+	mux.HandleFunc("/api/rooms/", roomHandler)
+
+	created := postJSON(t, mux, "/api/rooms", `{"name":"房主"}`)
+	code := created["code"].(string)
+	hostID := created["player_id"].(string)
+	joined := postJSON(t, mux, "/api/rooms/"+code+"/join", `{"name":"猜测者"}`)
+	guestID := joined["player_id"].(string)
+	store.rooms[code].MaxRounds = 1
+	postJSON(t, mux, "/api/rooms/"+code+"/ready", `{"player_id":"`+hostID+`"}`)
+	postJSON(t, mux, "/api/rooms/"+code+"/ready", `{"player_id":"`+guestID+`"}`)
+	postJSON(t, mux, "/api/rooms/"+code+"/start", `{"player_id":"`+hostID+`"}`)
+	postJSON(t, mux, "/api/rooms/"+code+"/submit", `{"player_id":"`+hostID+`","transcript":"雨后的电车穿过橘色隧道"}`)
+	final := postJSON(t, mux, "/api/rooms/"+code+"/guess", `{"player_id":"`+guestID+`","guess":"雨后的电车穿过橘色隧道"}`)
+	if final["phase"] != "finished" || final["stage"] != "finished" {
+		t.Fatalf("expected finished reveal, got phase=%v stage=%v", final["phase"], final["stage"])
+	}
+	if final["final_guess_player_id"] != guestID || len(final["turns"].([]any)) != 1 {
+		t.Fatalf("expected final guess metadata and one relay turn, got player=%v turns=%v", final["final_guess_player_id"], final["turns"])
+	}
+}
